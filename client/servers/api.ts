@@ -4,8 +4,9 @@ import axios from "axios";
 import * as SecureStore from "expo-secure-store";
 
 const axiosInstance = axios.create({
-  baseURL: "http://172.20.10.4:5000",
-  timeout: 10000, // Set timeout as needed
+  // baseURL: "http://192.168.43.11:5000",
+  baseURL: "https://spassion.onrender.com",
+  // timeout: 10000,
   headers: {
     "Content-Type": "application/json",
   },

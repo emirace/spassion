@@ -1,5 +1,3 @@
-// contexts/SyncOrdersContext.tsx
-
 import React, { createContext, useState, useEffect, ReactNode } from "react";
 import {
   fetchOrders,
@@ -7,18 +5,23 @@ import {
   deleteOrder,
   fetchItems,
   initDatabase,
+  insertItem,
+  updateOrder,
+  updateItem,
+  deleteItem,
 } from "../storage/database";
 import { apiGetOrders, apiPostOrder, apiDeleteOrder } from "@/servers/order";
 import { Order } from "@/types/order";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { Item } from "@/types/item";
-import { apiGetItems, apiPostItem, apiUpdateItem } from "@/servers/item";
+import { apiDeleteItem, apiGetItems, apiPostItem } from "@/servers/item";
+import { useAuth } from "./Auth";
 
 interface SyncOrdersContextProps {
   isSyncing: boolean;
   syncError: string | null;
-  syncOrdersWithServer: () => Promise<void>;
-  syncItemsWithServer: () => Promise<void>;
+  syncFromServer: () => Promise<void>;
+  syncToServer: () => Promise<void>;
 }
 
 const SyncOrdersContext = createContext<SyncOrdersContextProps | undefined>(
@@ -46,119 +49,164 @@ const SyncOrdersProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
   const isOnline = useOnlineStatus();
+  const { user } = useAuth();
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
-  const syncOrdersWithServer = async () => {
+  const syncFromServer = async () => {
     if (isSyncing) return;
+
     setIsSyncing(true);
     setSyncError(null);
 
     try {
-      // Fetch local orders
-      const localOrders = await new Promise<Order[]>((resolve) => {
-        fetchOrders(resolve);
-      });
+      const [serverOrders, serverItems] = await Promise.all([
+        apiGetOrders(),
+        apiGetItems(),
+      ]);
 
-      // Fetch orders from the server
-      const serverOrders = await apiGetOrders();
+      // Fetch local orders and items concurrently
+      const [localOrders, localItems] = await Promise.all([
+        new Promise<Order[]>(fetchOrders),
+        new Promise<Item[]>(fetchItems),
+      ]);
 
-      // Convert server orders to a map for quick lookup
-      const serverOrdersMap = new Map(
-        serverOrders.map((order) => [order.id, order])
+      const localOrdersMap = new Map(
+        localOrders.map((order) => [order.id, order])
       );
+      const localItemsMap = new Map(localItems.map((item) => [item.id, item]));
 
-      // Sync local orders with the server
-      await Promise.all(
-        localOrders.map(async (localOrder) => {
-          const matchingServerOrder = serverOrdersMap.get(localOrder.id);
-
-          if (!matchingServerOrder) {
-            // Order is local only, push to server
-            await retryOperation(() => apiPostOrder(localOrder));
-          } else {
-            // Resolve any conflicts
-            if (localOrder.updatedAt > matchingServerOrder.updatedAt) {
-              await retryOperation(() => apiPostOrder(localOrder));
-            }
-          }
-        })
-      );
-
-      // Sync server orders with local
+      // Sync Orders: Insert or update based on existence and timestamp
       await Promise.all(
         serverOrders.map(async (serverOrder) => {
-          if (!localOrders.find((o) => o.id === serverOrder.id)) {
-            await retryOperation(() =>
-              apiDeleteOrder(serverOrder.id as number)
-            );
+          const localOrder = localOrdersMap.get(serverOrder.id);
+          if (localOrder) {
+            if (serverOrder.updatedAt > localOrder.updatedAt) {
+              await updateOrder(serverOrder); // Update existing order
+            }
+          } else {
+            await insertOrder(serverOrder); // Insert new order
           }
         })
       );
+
+      // Sync Items: Insert or update based on existence and timestamp
+      await Promise.all(
+        serverItems.map(async (serverItem) => {
+          const localItem = localItemsMap.get(serverItem.id);
+          if (localItem) {
+            if (serverItem.updatedAt > localItem.updatedAt) {
+              await updateItem(serverItem); // Update existing item
+            }
+          } else {
+            await insertItem(serverItem); // Insert new item
+          }
+        })
+      );
+
+      // Delete items from local DB that are no longer on the server
+      const serverItemIds = new Set(serverItems.map((item) => item.id));
+      await Promise.all(
+        localItems.map(async (localItem) => {
+          if (!serverItemIds.has(localItem.id)) {
+            await deleteItem(localItem.id as number); // Delete missing items
+          }
+        })
+      );
+
+      console.log("Sync from server successfully");
     } catch (error) {
-      console.error("Error during sync:", error);
-      setSyncError("Failed to sync orders");
+      console.error("Error syncing from server:", error);
+      setSyncError("Failed to sync from server");
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const syncItemsWithServer = async () => {
+  const syncToServer = async () => {
+    if (isSyncing) return;
+
+    setIsSyncing(true);
+    setSyncError(null);
+
     try {
-      setIsSyncing(true);
-      setSyncError(null);
+      // Fetch local orders and items concurrently
+      const [localOrders, localItems] = await Promise.all([
+        new Promise<Order[]>(fetchOrders),
+        new Promise<Item[]>(fetchItems),
+      ]);
 
-      const localItems = await new Promise<Item[]>((resolve) => {
-        fetchItems(resolve);
-      });
-
-      const serverItems = await apiGetItems();
+      // Fetch server orders and items concurrently
+      const [serverOrders, serverItems] = await Promise.all([
+        apiGetOrders(),
+        apiGetItems(),
+      ]);
       console.log(serverItems);
+      const serverOrdersMap = new Map(
+        serverOrders.map((order) => [order.id, order])
+      );
       const serverItemsMap = new Map(
         serverItems.map((item) => [item.id, item])
       );
 
+      // Sync Orders
+      await Promise.all(
+        localOrders.map(async (localOrder) => {
+          const matchingServerOrder = serverOrdersMap.get(localOrder.id);
+          if (
+            !matchingServerOrder ||
+            localOrder.updatedAt > matchingServerOrder.updatedAt
+          ) {
+            await retryOperation(() => apiPostOrder(localOrder));
+          }
+        })
+      );
+
+      // Sync Items
       await Promise.all(
         localItems.map(async (localItem) => {
           const matchingServerItem = serverItemsMap.get(localItem.id);
-
-          if (!matchingServerItem) {
+          if (
+            !matchingServerItem ||
+            localItem.updatedAt > matchingServerItem.updatedAt
+          ) {
             await retryOperation(() => apiPostItem(localItem));
-          } else {
-            if (localItem.updatedAt > matchingServerItem.updatedAt) {
-              await retryOperation(() => {
-                return apiUpdateItem(localItem, localItem.id as number);
-              });
-            }
           }
         })
       );
 
-      await Promise.all(
-        serverItems.map(async (serverItem) => {
-          if (!localItems.find((o) => o.id === serverItem.id)) {
-            await retryOperation(() => apiDeleteItem(serverItem.id));
-          }
-        })
-      );
+      // Handle deletions for manager role
+      if (user?.role === "manager") {
+        await Promise.all(
+          serverItems.map(async (serverItem) => {
+            if (!localItems.some((item) => item.id === serverItem.id)) {
+              await retryOperation(() =>
+                apiDeleteItem(serverItem.id as number)
+              );
+            }
+          })
+        );
+      }
+
+      console.log("Sync to server successfully");
     } catch (error) {
-      setSyncError("Failed to sync items");
-      console.error("Error during sync:", error);
+      console.error("Error syncing to server:", error);
+      setSyncError("Failed to sync to server");
     } finally {
       setIsSyncing(false);
     }
   };
 
   useEffect(() => {
-    const syncStatus = async () => {
+    const syncOnOnlineStatus = async () => {
       await initDatabase();
       if (isOnline) {
-        await syncItemsWithServer();
-        await syncOrdersWithServer();
+        await syncFromServer();
+        await syncToServer();
       }
     };
 
-    syncStatus();
+    syncOnOnlineStatus();
   }, [isOnline]);
 
   return (
@@ -166,8 +214,8 @@ const SyncOrdersProvider: React.FC<{ children: ReactNode }> = ({
       value={{
         isSyncing,
         syncError,
-        syncOrdersWithServer,
-        syncItemsWithServer,
+        syncFromServer,
+        syncToServer,
       }}
     >
       {children}
@@ -184,6 +232,3 @@ const useSyncOrders = () => {
 };
 
 export { SyncOrdersProvider, useSyncOrders };
-function apiDeleteItem(id: any): Promise<boolean | void> {
-  throw new Error("Function not implemented.");
-}

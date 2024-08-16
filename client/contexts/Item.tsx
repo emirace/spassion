@@ -30,19 +30,20 @@ export const ItemProvider: React.FC<{ children: ReactNode }> = ({
   const [items, setItems] = useState<Item[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
 
-  useEffect(() => {
-    const loadItems = async () => {
-      if (isSyncing) return;
+  const loadItems = async () => {
+    if (isSyncing) return;
 
-      try {
-        const localItems = await new Promise<Item[]>((resolve) => {
-          fetchItems(resolve);
-        });
-        setItems(localItems);
-      } catch (error) {
-        console.error("Failed to fetch items:", error);
-      }
-    };
+    try {
+      const localItems = await new Promise<Item[]>((resolve) => {
+        fetchItems(resolve);
+      });
+      setItems(localItems);
+    } catch (error) {
+      console.error("Failed to fetch items:", error);
+    }
+  };
+
+  useEffect(() => {
     const loadCategories = async () => {
       try {
         const uniqueCategories = await new Promise<string[]>((resolve) => {
@@ -85,6 +86,7 @@ export const ItemProvider: React.FC<{ children: ReactNode }> = ({
       setItems((prevItems) =>
         prevItems.map((i) => (i.id === item.id ? { ...i, ...item } : i))
       );
+      loadItems();
     } catch (error) {
       console.error("Failed to update item:", error);
     }
@@ -94,6 +96,7 @@ export const ItemProvider: React.FC<{ children: ReactNode }> = ({
     try {
       await deleteItem(id);
       setItems((prevItems) => prevItems.filter((item) => item.id !== id));
+      loadItems();
     } catch (error) {
       console.error("Failed to remove item:", error);
     }

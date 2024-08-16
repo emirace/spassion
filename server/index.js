@@ -39,6 +39,7 @@ mongoose
 const itemSchema = new mongoose.Schema({
   quantity: Number,
   updatedAt: Date,
+  createdAt: Date,
   id: Number,
   name: String,
   price: Number,
@@ -47,6 +48,7 @@ const itemSchema = new mongoose.Schema({
   imageUrl: String,
   stock: Number,
   removed: { type: Boolean, default: false },
+  user: String,
 });
 
 const Item = mongoose.model("Item", itemSchema);
@@ -267,14 +269,20 @@ app.get("/items", async (req, res) => {
   }
 });
 
-// Create a new item
 app.post("/items", async (req, res) => {
   try {
-    const newItem = new Item(req.body);
-    await newItem.save();
-    res.json(newItem);
+    const { id, ...itemData } = req.body;
+
+    const item = await Item.findOneAndUpdate(
+      { id },
+      { $set: { ...itemData, updatedAt: new Date() } },
+      { new: true, upsert: true }
+    );
+
+    res.json(item);
   } catch (error) {
-    res.status(500).json({ error: "Failed to create item" });
+    res.status(500).json({ error: "Failed to create or update order" });
+    console.log(error);
   }
 });
 
@@ -293,10 +301,11 @@ app.put("/items/:id", async (req, res) => {
 // Delete an item (soft delete by setting removed to true)
 app.delete("/items/:id", async (req, res) => {
   try {
-    const item = await Item.findByIdAndUpdate(req.params.id, { removed: true });
+    const item = await Item.findOneAndDelete({ id: req.params.id });
     res.json(item);
   } catch (error) {
     res.status(500).json({ error: "Failed to delete item" });
+    console.log(error);
   }
 });
 
@@ -310,14 +319,20 @@ app.get("/orders", async (req, res) => {
   }
 });
 
-// Create a new order
+// Create and update  order
 app.post("/orders", async (req, res) => {
   try {
-    const newOrder = new Order(req.body);
-    await newOrder.save();
-    res.json(newOrder);
+    const { id, ...orderData } = req.body;
+
+    const order = await Order.findOneAndUpdate(
+      { id },
+      { $set: { ...orderData, updatedAt: new Date() } },
+      { new: true, upsert: true }
+    );
+
+    res.json(order);
   } catch (error) {
-    res.status(500).json({ error: "Failed to create order" });
+    res.status(500).json({ error: "Failed to create or update order" });
     console.log(error);
   }
 });

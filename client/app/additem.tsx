@@ -23,10 +23,12 @@ import * as ImagePicker from "expo-image-picker";
 import { useItem } from "@/contexts/Item";
 import axiosInstance from "@/servers/api";
 import { SaveFormat, manipulateAsync } from "expo-image-manipulator";
+import { useAuth } from "@/contexts/Auth";
 
 const AddItemScreen: React.FC = () => {
   const { colors } = useTheme();
   const { addItem, fetchItem, updateItem, removeItem } = useItem();
+  const { user } = useAuth();
   const router = useRouter();
   const { id } = useLocalSearchParams();
 
@@ -42,6 +44,7 @@ const AddItemScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [uploading, setUploading] = useState(false);
+  const [createdAt, setCreatedAt] = useState<Date>(new Date());
 
   useEffect(() => {
     if (isEditing && id) {
@@ -55,6 +58,7 @@ const AddItemScreen: React.FC = () => {
           setDescription(item.description || "");
           setImageUrl(item.imageUrl || "");
           setStock(item.stock.toString());
+          setCreatedAt(item.createdAt);
         }
       };
       loadItem();
@@ -121,9 +125,9 @@ const AddItemScreen: React.FC = () => {
     let type = match ? `image/${match[1]}` : `image`;
 
     const maxSize = 1024;
-    const img = Image.resolveAssetSource(result);
-    const { width, height } = img;
+    const img: any = await Image.resolveAssetSource(result);
 
+    const { width, height } = img.assets[0];
     const aspectRatio = width / height;
     let newWidth, newHeight;
     if (aspectRatio >= 1) {
@@ -133,7 +137,7 @@ const AddItemScreen: React.FC = () => {
       newHeight = maxSize;
       newWidth = maxSize * aspectRatio;
     }
-
+    console.log(newWidth, newHeight);
     try {
       setUploading(true);
       const resizedImage = await manipulateAsync(
@@ -141,6 +145,8 @@ const AddItemScreen: React.FC = () => {
         [{ resize: { width: newWidth, height: newHeight } }],
         { format: SaveFormat.JPEG, compress: 0.8 } // Adjust the image format and compression quality as needed
       );
+
+      console.log(resizedImage);
 
       const formData = new FormData();
       formData.append("file", {
@@ -189,10 +195,12 @@ const AddItemScreen: React.FC = () => {
         imageUrl,
         stock: parseInt(stock),
         updatedAt: new Date(),
+        createdAt: id ? createdAt : new Date(),
+        user: user?.username || "",
       };
 
       if (isEditing && id) {
-        await updateItem(itemData);
+        await updateItem({ ...itemData, id: id as unknown as number });
       } else {
         await addItem(itemData);
       }
@@ -226,7 +234,7 @@ const AddItemScreen: React.FC = () => {
       },
     ]);
   };
-  console.log(imageUrl);
+
   return (
     <KeyboardAvoidingView
       style={styles.container}

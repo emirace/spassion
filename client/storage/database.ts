@@ -4,7 +4,7 @@ import { Order } from "@/types/order";
 import { Item } from "@/types/item";
 import * as SQLite from "expo-sqlite";
 
-const db = SQLite.openDatabaseSync("pos_app.db");
+const db = SQLite.openDatabaseSync("pos_app2.db");
 
 // Initialize the database with required tables
 export const initDatabase = async () => {
@@ -31,9 +31,12 @@ export const initDatabase = async () => {
           price REAL,
           category TEXT,
           description TEXT,
+          createdAt TEXT,
+          updatedAt TEXT,
           imageUrl TEXT,
           stock INTEGER,
-          removed INTEGER
+          removed INTEGER,
+          user TEXT
         )`
     );
   } catch (error) {
@@ -46,8 +49,8 @@ const serializeOrder = (order: Order) => {
   return {
     ...order,
     items: JSON.stringify(order.items),
-    createdAt: order.createdAt.toISOString(),
-    updatedAt: order.updatedAt.toISOString(),
+    createdAt: order.createdAt.toString(),
+    updatedAt: order.updatedAt.toString(),
     paid: order.paid ? 1 : 0,
   };
 };
@@ -65,22 +68,21 @@ const deserializeOrder = (row: any): Order => {
 
 // Insert an item into the database and return the created item
 export const insertItem = async (item: Item): Promise<Item | null> => {
+  console.log(item);
   try {
     // Insert the item into the database
     await db.runAsync(
-      `INSERT INTO items (${
-        item.id !== undefined ? "id," : ""
-      } name, price, category, description, imageUrl, stock,removed) VALUES (${
-        item.id !== undefined ? "?," : ""
-      } ?, ?, ?, ?, ?, ?,?)`,
-      ...(item.id !== undefined ? [item.id] : []),
+      `INSERT INTO items (name, price, category, description, imageUrl, updatedAt, createdAt, stock,removed,user) VALUES (?, ?, ?, ?,?, ?, ?,?,?,?)`,
       item.name ?? null,
       item.price ?? null,
       item.category ?? null,
       item.description ?? null,
       item.imageUrl ?? null,
+      item.createdAt.toString() ?? null,
+      item.updatedAt.toString() ?? null,
       item.stock ?? null,
-      item.removed ?? false
+      item.removed ?? false,
+      item.user ?? null
     );
 
     // If you need to retrieve the ID of the newly inserted item,
@@ -111,7 +113,9 @@ export const fetchItems = async (callback: (items: Item[]) => void) => {
       imageUrl: row.imageUrl || "",
       stock: Number(row.stock),
       updatedAt: row.updatedAt,
+      createdAt: row.createdAt,
       removed: row.removed,
+      user: row.user,
     }));
     callback(items);
   } catch (error) {
@@ -139,7 +143,7 @@ export const updateItem = async (item: Item) => {
     console.log("Starting update for item:", item);
 
     await db.runAsync(
-      `UPDATE items SET name = ?, price = ?, category = ?, description = ?, imageUrl = ?, stock = ?, removed = ? WHERE id = ?`,
+      `UPDATE items SET name = ?, price = ?, category = ?, description = ?, imageUrl = ?, stock = ?, removed = ?, updatedAt = ?  WHERE id = ?`,
       item.name,
       item.price,
       item.category,
@@ -147,6 +151,7 @@ export const updateItem = async (item: Item) => {
       item.imageUrl || "",
       item.stock,
       item.removed || false,
+      item.updatedAt.toString() || new Date().toString(),
       item.id!
     );
 
@@ -154,6 +159,39 @@ export const updateItem = async (item: Item) => {
   } catch (error) {
     console.error(`Failed to update item with ID ${item.id}:`, error);
     throw error; // Re-throw the error if you want to handle it further up the call stack
+  }
+};
+
+// Fetch an item by its ID from the database
+export const fetchItemById = async (
+  itemId: number,
+  callback: (item: Item | null) => void
+) => {
+  try {
+    const result: any = await db.getAllAsync(
+      `SELECT * FROM items WHERE id = ?`,
+      itemId
+    );
+    if (result.length > 0) {
+      const item: Item = {
+        id: result[0].id,
+        name: result[0].name,
+        price: result[0].price,
+        category: result[0].category,
+        description: result[0].description || "",
+        imageUrl: result[0].imageUrl || "",
+        stock: Number(result[0].stock),
+        updatedAt: result[0].updatedAt,
+        createdAt: result[0].createdAt,
+        user: result[0].user,
+      };
+      callback(item);
+    } else {
+      callback(null);
+    }
+  } catch (error) {
+    console.error("Error fetching item by ID:", error);
+    callback(null);
   }
 };
 
@@ -178,72 +216,25 @@ export const fetchOrderById = async (
   }
 };
 
-// Fetch an item by its ID from the database
-export const fetchItemById = async (
-  itemId: number,
-  callback: (item: Item | null) => void
-) => {
-  try {
-    const result: any = await db.getAllAsync(
-      `SELECT * FROM items WHERE id = ?`,
-      itemId
-    );
-    if (result.length > 0) {
-      const item: Item = {
-        id: result[0].id,
-        name: result[0].name,
-        price: result[0].price,
-        category: result[0].category,
-        description: result[0].description || "",
-        imageUrl: result[0].imageUrl || "",
-        stock: Number(result[0].stock),
-        updatedAt: result[0].updatedAt,
-      };
-      callback(item);
-    } else {
-      callback(null);
-    }
-  } catch (error) {
-    console.error("Error fetching item by ID:", error);
-    callback(null);
-  }
-};
-
 // Insert an order into the database
 export const insertOrder = async (order: Order) => {
   try {
     const serializedOrder = serializeOrder(order);
 
-    const query = order.id
-      ? `INSERT INTO orders (id, items, totalPrice, createdAt, updatedAt, status, customerName, paid, note, user)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,?)`
-      : `INSERT INTO orders (items, totalPrice, createdAt, updatedAt, status, customerName, paid, note, user)
+    const query = `INSERT INTO orders (items, totalPrice, createdAt, updatedAt, status, customerName, paid, note, user)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-    const params = order.id
-      ? [
-          serializedOrder.id ?? null, // Ensure no undefined values
-          serializedOrder.items ?? null,
-          serializedOrder.totalPrice ?? null,
-          serializedOrder.createdAt ?? null,
-          serializedOrder.updatedAt ?? null,
-          serializedOrder.status ?? null,
-          serializedOrder.customerName ?? null,
-          serializedOrder.paid ?? null,
-          serializedOrder.note ?? null,
-          serializedOrder.user ?? null,
-        ]
-      : [
-          serializedOrder.items ?? null,
-          serializedOrder.totalPrice ?? null,
-          serializedOrder.createdAt ?? null,
-          serializedOrder.updatedAt ?? null,
-          serializedOrder.status ?? null,
-          serializedOrder.customerName ?? null,
-          serializedOrder.paid ?? null,
-          serializedOrder.note ?? null,
-          serializedOrder.user ?? null,
-        ];
+    const params = [
+      serializedOrder.items ?? null,
+      serializedOrder.totalPrice ?? null,
+      serializedOrder.createdAt ?? null,
+      serializedOrder.updatedAt ?? null,
+      serializedOrder.status ?? null,
+      serializedOrder.customerName ?? null,
+      serializedOrder.paid ?? null,
+      serializedOrder.note ?? null,
+      serializedOrder.user ?? null,
+    ];
 
     await db.runAsync(query, ...params);
 
@@ -289,7 +280,7 @@ export const updateOrder = async (order: Order) => {
       serializedOrder.items,
       serializedOrder.totalPrice,
       serializedOrder.createdAt,
-      serializedOrder.updatedAt,
+      new Date().toString(),
       serializedOrder.status,
       serializedOrder.customerName || "",
       serializedOrder.paid,

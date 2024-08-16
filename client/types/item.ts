@@ -9,6 +9,8 @@ export interface Item {
   category: string;
   description?: string;
   imageUrl?: string;
+  createdAt: Date;
   stock: number;
   removed?: boolean;
+  user: string;
 }
