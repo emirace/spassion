@@ -32,7 +32,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     const loadUser = async () => {
       try {
         const storedUser = await SecureStore.getItemAsync("user");
-        console.log(storedUser);
         if (storedUser) {
           setUser(JSON.parse(storedUser));
           setIsAuthenticated(true);

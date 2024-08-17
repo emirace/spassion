@@ -81,7 +81,9 @@ const SyncOrdersProvider: React.FC<{ children: ReactNode }> = ({
         serverOrders.map(async (serverOrder) => {
           const localOrder = localOrdersMap.get(serverOrder.id);
           if (localOrder) {
-            if (serverOrder.updatedAt > localOrder.updatedAt) {
+            if (
+              new Date(serverOrder.updatedAt) > new Date(localOrder.updatedAt)
+            ) {
               await updateOrder(serverOrder); // Update existing order
             }
           } else {
@@ -95,7 +97,9 @@ const SyncOrdersProvider: React.FC<{ children: ReactNode }> = ({
         serverItems.map(async (serverItem) => {
           const localItem = localItemsMap.get(serverItem.id);
           if (localItem) {
-            if (serverItem.updatedAt > localItem.updatedAt) {
+            if (
+              new Date(serverItem.updatedAt) > new Date(localItem.updatedAt)
+            ) {
               await updateItem(serverItem); // Update existing item
             }
           } else {
@@ -141,7 +145,6 @@ const SyncOrdersProvider: React.FC<{ children: ReactNode }> = ({
         apiGetOrders(),
         apiGetItems(),
       ]);
-      console.log(serverItems);
       const serverOrdersMap = new Map(
         serverOrders.map((order) => [order.id, order])
       );
@@ -155,7 +158,8 @@ const SyncOrdersProvider: React.FC<{ children: ReactNode }> = ({
           const matchingServerOrder = serverOrdersMap.get(localOrder.id);
           if (
             !matchingServerOrder ||
-            localOrder.updatedAt > matchingServerOrder.updatedAt
+            new Date(localOrder.updatedAt) >
+              new Date(matchingServerOrder.updatedAt)
           ) {
             await retryOperation(() => apiPostOrder(localOrder));
           }
@@ -168,7 +172,8 @@ const SyncOrdersProvider: React.FC<{ children: ReactNode }> = ({
           const matchingServerItem = serverItemsMap.get(localItem.id);
           if (
             !matchingServerItem ||
-            localItem.updatedAt > matchingServerItem.updatedAt
+            new Date(localItem.updatedAt) >
+              new Date(matchingServerItem.updatedAt)
           ) {
             await retryOperation(() => apiPostItem(localItem));
           }
